@@ -1,6 +1,10 @@
-#import "AppDelegate.h"
-#import <ScriptingBridge/ScriptingBridge.h>
-#import <objc/runtime.h>
+
+@import Cocoa;
+@import ScriptingBridge;
+@import ObjectiveC;
+
+@interface AppDelegate : NSObject <NSApplicationDelegate, NSUserNotificationCenterDelegate>
+@end
 
 NSString * const TerminalNotifierBundleID = @"nl.superalloy.oss.terminal-notifier";
 NSString * const NotificationCenterUIBundleID = @"com.apple.notificationcenterui";
@@ -390,3 +394,8 @@ isMavericks()
 }
 
 @end
+
+int main(int argc, char *argv[])
+{
+    return NSApplicationMain(argc, (const char **)argv);
+}
