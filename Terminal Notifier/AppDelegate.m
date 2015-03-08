@@ -3,11 +3,8 @@
 @import ScriptingBridge;
 @import ObjectiveC;
 
-@interface AppDelegate : NSObject <NSApplicationDelegate, NSUserNotificationCenterDelegate>
-@end
-
-NSString * const TerminalNotifierBundleID = @"nl.superalloy.oss.terminal-notifier";
-NSString * const NotificationCenterUIBundleID = @"com.apple.notificationcenterui";
+NSString * const TerminalNotifierBundleID     = @"nl.superalloy.oss.terminal-notifier",
+         * const NotificationCenterUIBundleID = @"com.apple.notificationcenterui";
 
 // Set OS Params
 #define NSAppKitVersionNumber10_8 1187
@@ -19,34 +16,44 @@ NSString *_fakeBundleIdentifier = nil;
 
 @implementation NSBundle (FakeBundleIdentifier)
 
-// Overriding bundleIdentifier works, but overriding NSUserNotificationAlertStyle does not work.
+/// @note Overriding bundleIdentifier works, but overriding NSUserNotificationAlertStyle does not work.
 
-- (NSString *)__bundleIdentifier;
-{
-  if (self == [NSBundle mainBundle]) {
-    return _fakeBundleIdentifier ? _fakeBundleIdentifier : TerminalNotifierBundleID;
-  } else {
-    return [self __bundleIdentifier];
-  }
-}
+//- (NSString*) __bundleIdentifier {
+//
+//  if (self == [NSBundle mainBundle]) {
+//    return _fakeBundleIdentifier ? _fakeBundleIdentifier : TerminalNotifierBundleID;
+//  } else {
+//    return [self __bundleIdentifier];
+//  }
+//}
 
 @end
 
-static BOOL
-InstallFakeBundleIdentifierHook()
-{
+static BOOL InstallFakeBundleIdentifierHook() {
+
   Class class = objc_getClass("NSBundle");
-  if (class) {
-    method_exchangeImplementations(class_getInstanceMethod(class, @selector(bundleIdentifier)),
-                                   class_getInstanceMethod(class, @selector(__bundleIdentifier)));
-    return YES;
-  }
-  return NO;
+
+  if (!class) return NO;
+
+  Method origMethod = class_getInstanceMethod(class, @selector(bundleIdentifier));
+  NSString *(*origBID)(id, SEL) = (void *)method_getImplementation(origMethod);
+
+  class_replaceMethod(class, @selector(bundleIdentifier),
+                      imp_implementationWithBlock(^NSString*(id self, SEL sel){
+
+    return self == NSBundle.mainBundle ? _fakeBundleIdentifier ?: TerminalNotifierBundleID : origBID(self, sel);
+
+  }), "@:@");
+
+//                          return ncDelegate->_fakeBundleID ?: @"com.apple.finder"; }), "@:@");
+//
+//    method_exchangeImplementations(class_getInstanceMethod(class, @selector(bundleIdentifier)),
+//                                   class_getInstanceMethod(class, @selector(__bundleIdentifier)));
+
+  return YES;
 }
 
-static BOOL
-isMavericks()
-{
+static BOOL isMavericks() {
   if (floor(NSAppKitVersionNumber) <= NSAppKitVersionNumber10_8) {
     /* On a 10.8 - 10.8.x system */
     return NO;
@@ -57,82 +64,31 @@ isMavericks()
 }
 
 @implementation NSUserDefaults (SubscriptAndUnescape)
-- (id)objectForKeyedSubscript:(id)key;
-{
+- objectForKeyedSubscript:key {
+
   id obj = [self objectForKey:key];
-  if ([obj isKindOfClass:[NSString class]] && [(NSString *)obj hasPrefix:@"\\"]) {
-    obj = [(NSString *)obj substringFromIndex:1];
+  if ([obj isKindOfClass:[NSString class]] && [(NSString*)obj hasPrefix:@"\\"]) {
+    obj = [(NSString*)obj substringFromIndex:1];
   }
   return obj;
 }
 @end
 
+@interface AppDelegate : NSObject <NSApplicationDelegate, NSUserNotificationCenterDelegate>
+@end
 
 @implementation AppDelegate
 
-+(void)initializeUserDefaults
-{
-  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
++ (void)initializeUserDefaults {
 
-  // initialize the dictionary with default values depending on OS level
-  NSDictionary *appDefaults;
-
-  if (isMavericks()) {
-    //10.9
-    appDefaults = @{@"sender": @"com.apple.Terminal"};
-  } else {
-    //10.8
-    appDefaults = @{@"": @"message"};
-  }
-
-  // and set them appropriately
-  [defaults registerDefaults:appDefaults];
+  // initialize the dictionary with default values depending on OS level and set them appropriately
+  [NSUserDefaults.standardUserDefaults registerDefaults:
+                                         isMavericks() ? @{@"sender": @"com.apple.Terminal"}  // 10.9
+                                                       :       @{@"": @"message"}];           // 10.8
 }
 
-- (void)printHelpBanner;
-{
-  const char *appName = [[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleExecutable"] UTF8String];
-  const char *appVersion = [[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] UTF8String];
-  printf("%s (%s) is a command-line tool to send OS X User Notifications.\n" \
-         "\n" \
-         "Usage: %s -[message|list|remove] [VALUE|ID|ID] [options]\n" \
-         "\n" \
-         "   Either of these is required (unless message data is piped to the tool):\n" \
-         "\n" \
-         "       -help              Display this help banner.\n" \
-         "       -message VALUE     The notification message.\n" \
-         "       -remove ID         Removes a notification with the specified ‘group’ ID.\n" \
-         "       -list ID           If the specified ‘group’ ID exists show when it was delivered,\n" \
-         "                          or use ‘ALL’ as ID to see all notifications.\n" \
-         "                          The output is a tab-separated list.\n"
-         "\n" \
-         "   Optional:\n" \
-         "\n" \
-         "       -title VALUE       The notification title. Defaults to ‘Terminal’.\n" \
-         "       -subtitle VALUE    The notification subtitle.\n" \
-         "       -sound NAME        The name of a sound to play when the notification appears. The names are listed\n" \
-         "                          in Sound Preferences. Use 'default' for the default notification sound.\n" \
-         "       -group ID          A string which identifies the group the notifications belong to.\n" \
-         "                          Old notifications with the same ID will be removed.\n" \
-         "       -activate ID       The bundle identifier of the application to activate when the user clicks the notification.\n" \
-         "       -sender ID         The bundle identifier of the application that should be shown as the sender, including its icon.\n" \
-         "       -appIcon URL       The URL of a image to display instead of the application icon (Mavericks+ only)\n" \
-         "       -contentImage URL  The URL of a image to display attached to the notification (Mavericks+ only)\n" \
-         "       -open URL          The URL of a resource to open when the user clicks the notification.\n" \
-         "       -execute COMMAND   A shell command to perform when the user clicks the notification.\n" \
-         "\n" \
-         "When the user activates a notification, the results are logged to the system logs.\n" \
-         "Use Console.app to view these logs.\n" \
-         "\n" \
-         "Note that in some circumstances the first character of a message has to be escaped in order to be recognized.\n" \
-         "An example of this is when using an open bracket, which has to be escaped like so: ‘\\[’.\n" \
-         "\n" \
-         "For more information see https://github.com/alloy/terminal-notifier.\n",
-         appName, appVersion, appName);
-}
+- (void) applicationDidFinishLaunching:(NSNotification*)notification {
 
-- (void)applicationDidFinishLaunching:(NSNotification *)notification;
-{
   NSUserNotification *userNotification = notification.userInfo[NSApplicationLaunchUserNotificationKey];
   if (userNotification) {
     [self userActivatedNotification:userNotification];
@@ -220,36 +176,10 @@ isMavericks()
   }
 }
 
-- (NSImage*)getImageFromURL:(NSString *) url;
-{
-  NSURL *imageURL = [NSURL URLWithString:url];
-  if([[imageURL scheme] length] == 0){
-    // Prefix 'file://' if no scheme
-    imageURL = [NSURL fileURLWithPath:url];
-  }
-  return [[NSImage alloc] initWithContentsOfURL:imageURL];
-}
+- (void)  deliverNotificationWithTitle:(NSString*)title       subtitle:(NSString*)subtitle
+                               message:(NSString*)message      options:(NSDictionary*)options
+                                                                 sound:(NSString*)sound {
 
-/**
- * Decode fragment identifier
- *
- * @see http://tools.ietf.org/html/rfc3986#section-2.1
- * @see http://en.wikipedia.org/wiki/URI_scheme
- */
-- (NSString*)decodeFragmentInURL:(NSString *) encodedURL fragment:(NSString *) framgent
-{
-    NSString *beforeStr = [@"%23" stringByAppendingString:framgent];
-    NSString *afterStr = [@"#" stringByAppendingString:framgent];
-    NSString *decodedURL = [encodedURL stringByReplacingOccurrencesOfString:beforeStr withString:afterStr];
-    return decodedURL;
-}
-
-- (void)deliverNotificationWithTitle:(NSString *)title
-                             subtitle:(NSString *)subtitle
-                             message:(NSString *)message
-                             options:(NSDictionary *)options
-                               sound:(NSString *)sound;
-{
   // First remove earlier notification with the same group ID.
   if (options[@"groupID"]) [self removeNotificationWithGroupID:options[@"groupID"]];
 
@@ -281,8 +211,8 @@ isMavericks()
   [center scheduleNotification:userNotification];
 }
 
-- (void)removeNotificationWithGroupID:(NSString *)groupID;
-{
+- (void) removeNotificationWithGroupID:(NSString*)groupID {
+
   NSUserNotificationCenter *center = [NSUserNotificationCenter defaultUserNotificationCenter];
   for (NSUserNotification *userNotification in center.deliveredNotifications) {
     if ([@"ALL" isEqualToString:groupID] || [userNotification.userInfo[@"groupID"] isEqualToString:groupID]) {
@@ -293,8 +223,8 @@ isMavericks()
   }
 }
 
-- (void)listNotificationWithGroupID:(NSString *)listGroupID;
-{
+- (void)   listNotificationWithGroupID:(NSString*)listGroupID {
+
   NSUserNotificationCenter *center = [NSUserNotificationCenter defaultUserNotificationCenter];
 
   NSMutableArray *lines = [NSMutableArray array];
@@ -317,9 +247,8 @@ isMavericks()
   }
 }
 
+- (void)     userActivatedNotification:(NSUserNotification*)userNotification {
 
-- (void)userActivatedNotification:(NSUserNotification *)userNotification;
-{
   [[NSUserNotificationCenter defaultUserNotificationCenter] removeDeliveredNotification:userNotification];
 
   NSString *groupID  = userNotification.userInfo[@"groupID"];
@@ -344,8 +273,8 @@ isMavericks()
   exit(success ? 0 : 1);
 }
 
-- (BOOL)activateAppWithBundleID:(NSString *)bundleID;
-{
+- (BOOL)       activateAppWithBundleID:(NSString*)bundleID {
+
   id app = [SBApplication applicationWithBundleIdentifier:bundleID];
   if (app) {
     [app activate];
@@ -357,8 +286,8 @@ isMavericks()
   }
 }
 
-- (BOOL)executeShellCommand:(NSString *)command;
-{
+- (BOOL)           executeShellCommand:(NSString*)command {
+
   NSPipe *pipe = [NSPipe pipe];
   NSFileHandle *fileHandle = [pipe fileHandleForReading];
 
@@ -380,22 +309,87 @@ isMavericks()
   return [task terminationStatus] == 0;
 }
 
-- (BOOL)userNotificationCenter:(NSUserNotificationCenter *)center
-     shouldPresentNotification:(NSUserNotification *)userNotification;
-{
+- (BOOL)        userNotificationCenter:(NSUserNotificationCenter*)center
+             shouldPresentNotification:(NSUserNotification*)userNotification {
+
   return YES;
 }
 
-// Once the notification is delivered we can exit.
-- (void)userNotificationCenter:(NSUserNotificationCenter *)center
-        didDeliverNotification:(NSUserNotification *)userNotification;
-{
-  exit(0);
+- (void)        userNotificationCenter:(NSUserNotificationCenter*)center
+                didDeliverNotification:(NSUserNotification*)userNotification {
+
+  exit(0); /// Once the notification is delivered we can exit.
+}
+
+#pragma mark - Helpers
+
+- (NSImage*)           getImageFromURL:(NSString*) url {
+
+  NSURL *imageURL = [NSURL URLWithString:url];
+  return [NSImage.alloc initWithContentsOfURL:imageURL.scheme.length ? imageURL
+                                 /* Prefix 'file://' if no scheme */ : [NSURL fileURLWithPath:url]];
+}
+
+- (NSString*)       decodeFragmentInURL:(NSString*)encodedURL fragment:(NSString*)framgent {
+
+/*! @abstract Decode fragment identifier
+    @see http://tools.ietf.org/html/rfc3986#section-2.1
+    @see http://en.wikipedia.org/wiki/URI_scheme
+ */
+
+    NSString *beforeStr = [@"%23" stringByAppendingString:framgent],
+              *afterStr  = [@"#" stringByAppendingString:framgent];
+  return [encodedURL stringByReplacingOccurrencesOfString:beforeStr withString:afterStr];
+}
+
+- (void) printHelpBanner {
+
+  const char *appName = [[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleExecutable"] UTF8String],
+          *appVersion = [[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] UTF8String];
+
+#define FG(x)   "\e[48;5;"#x"m"
+#define BG(x)   "\e[38;5;"#x"m"
+
+  printf("\n%s%s (%s)\e[m  %sis a command-line tool to send OS X User Notifications.\e[m\n\
+\n\
+Usage: %s -[message|list|remove] [VALUE|ID|ID] [options]\n\
+\n\
+\e[38;5;88mEither of these is required (unless message data is piped to the tool):\n\
+\n\
+  -help              Display this help banner.\n\
+  -message VALUE     The notification message.\n\
+  -remove ID         Removes a notification with the specified ‘group’ ID.\n\
+  -list ID           If the specified ‘group’ ID exists show when it was delivered,\n\
+                     or use ‘ALL’ as ID to see all notifications.\n\
+                     The output is a tab-separated list.\n\
+\n\
+Optional:\n\
+\n\
+  -title VALUE       The notification title. Defaults to ‘Terminal’.\n\
+  -subtitle VALUE    The notification subtitle.\n\
+  -sound NAME        The name of a sound to play when the notification appears. The names are listed\n\
+                     in Sound Preferences. Use 'default' for the default notification sound.\n\
+  -group ID          A string which identifies the group the notifications belong to.\n\
+                     Old notifications with the same ID will be removed.\n\
+  -activate ID       The bundle identifier of the application to activate when the user clicks the notification.\n\
+  -sender ID         The bundle identifier of the application that should be shown as the sender, including its icon.\n\
+  -appIcon URL       The URL of a image to display instead of the application icon (Mavericks+ only)\n\
+  -contentImage URL  The URL of a image to display attached to the notification (Mavericks+ only)\n\
+  -open URL          The URL of a resource to open when the user clicks the notification.\n\
+  -execute COMMAND   A shell command to perform when the user clicks the notification.\n\
+\n\
+When the user activates a notification, the results are logged to the system logs.\n\
+Use Console.app to view these logs.\n\
+\n\
+Note that in some circumstances the first character of a message has to be escaped in order to be recognized.\n\
+An example of this is when using an open bracket, which has to be escaped like so: ‘\n\\n\[’.\n\
+\n\
+For more information see https://github.com/alloy/terminal-notifier.\n\n", FG(2), appName, appVersion,FG(3),appName);
+
 }
 
 @end
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     return NSApplicationMain(argc, (const char **)argv);
 }
